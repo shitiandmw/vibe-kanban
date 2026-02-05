@@ -1,0 +1,68 @@
+name: Build macOS
+
+on:
+  workflow_dispatch:
+
+env:
+  RUST_TOOLCHAIN: nightly-2025-12-04
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: macos-13
+            target: x86_64-apple-darwin
+            name: macos-x64
+            deployment_target: "10.12"
+          - os: macos-14
+            target: aarch64-apple-darwin
+            name: macos-arm64
+            deployment_target: "11.0"
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install pnpm
+        run: npm install -g pnpm@10.13.1
+
+      - name: Install frontend dependencies
+        run: pnpm install
+
+      - name: Build frontend
+        run: cd frontend && pnpm run build
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal
+          rustup default ${{ env.RUST_TOOLCHAIN }}
+          rustup target add ${{ matrix.target }}
+
+      - name: Build backend
+        env:
+          MACOSX_DEPLOYMENT_TARGET: ${{ matrix.deployment_target }}
+        run: |
+          cargo build --release --target ${{ matrix.target }} \
+            -p server -p review \
+            --bin server --bin mcp_task_server --bin review
+
+      - name: Prepare artifacts
+        run: |
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/server dist/vibe-kanban
+          cp target/${{ matrix.target }}/release/mcp_task_server dist/vibe-kanban-mcp
+          cp target/${{ matrix.target }}/release/review dist/vibe-kanban-review
+          cd dist && zip -r vibe-kanban-${{ matrix.name }}.zip vibe-kanban vibe-kanban-mcp vibe-kanban-review
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vibe-kanban-${{ matrix.name }}
+          path: dist/vibe-kanban-${{ matrix.name }}.zip
+          retention-days: 7
